@@ -33,18 +33,34 @@ int main(int argc, char* argv[])
 
     gst_init(&argc, &argv); // init gstreamer
 
-    const char* serial = NULL; // set this if you do not want the first found device
+    const char* serial = NULL; // the serial number of the camera we want to use
 
     GError* err = NULL;
 
+    GstElement* pipeline =
+        gst_parse_launch("tcambin name=source ! video/x-raw,format=BGRx ! videoconvert ! ximagesink ", &err);
+
+    /* test for error */
+    if (pipeline == NULL)
+    {
+        printf("Could not create pipeline. Cause: %s\n", err->message);
+        return 1;
+    }
+
     GstElement* source = gst_bin_get_by_name(GST_BIN(pipeline), "source");
 
-    GstElement* pipeline =
-        gst_parse_launch("tcambin name=source ! videoconvert ! ximagesink sync=false", &err);
+    if (serial != NULL)
+    {
+        GValue val = {};
+        g_value_init(&val, G_TYPE_STRING);
+        g_value_set_static_string(&val, serial);
 
-    sleep(2);
+        g_object_set_property(G_OBJECT(source), "serial", &val);
 
-    tcam_property_provider_set_tcam_enumeration(TCAM_PROPERTY_PROVIDER(source), "TriggerMode", "On", &err);
+        g_value_unset(&val);
+    }
+
+    gst_element_set_state(pipeline, GST_STATE_PLAYING);
 
     if (err)
     {
