@@ -14,12 +14,10 @@
  * limitations under the License.
  */
 
-/* This example will show you how to trigger images */
+/* This example will show you how to start a live stream from your camera */
 
 #include <gst/gst.h>
-#include <stdio.h> /* printf */
-#include <tcam-property-1.0.h>
-#include <unistd.h> /* sleep  */
+#include <stdio.h> /* printf and putchar */
 
 
 int main(int argc, char* argv[])
@@ -35,40 +33,13 @@ int main(int argc, char* argv[])
 
     gst_init(&argc, &argv); // init gstreamer
 
-    const char* serial = NULL; // the serial number of the camera we want to use
+    const char* serial = NULL; // set this if you do not want the first found device
 
     GError* err = NULL;
 
     GstElement* pipeline =
-        gst_parse_launch("tcambin name=source ! video/x-raw,format=BGRx ! videoconvert ! ximagesink ", &err);
+        gst_parse_launch("tcambin name=source ! videoconvert ! ximagesink sync=false", &err);
 
-    /* test for error */
-    if (pipeline == NULL)
-    {
-        printf("Could not create pipeline. Cause: %s\n", err->message);
-        return 1;
-    }
-
-    GstElement* source = gst_bin_get_by_name(GST_BIN(pipeline), "source");
-
-    if (serial != NULL)
-    {
-        GValue val = {};
-        g_value_init(&val, G_TYPE_STRING);
-        g_value_set_static_string(&val, serial);
-
-        g_object_set_property(G_OBJECT(source), "serial", &val);
-
-        g_value_unset(&val);
-    }
-
-    gst_element_set_state(pipeline, GST_STATE_PLAYING);
-
-    /*
-      This sleep exists only to ensure
-      that a live image exists before trigger mode is activated.
-      for all other purposes this can be removed.
-     */
     sleep(2);
 
     tcam_property_provider_set_tcam_enumeration(TCAM_PROPERTY_PROVIDER(source), "TriggerMode", "On", &err);
