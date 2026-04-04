@@ -69,6 +69,7 @@ int main(int argc, char* argv[])
       that a live image exists before trigger mode is activated.
       for all other purposes this can be removed.
      */
+    sleep(2);
 
     tcam_property_provider_set_tcam_enumeration(TCAM_PROPERTY_PROVIDER(source), "TriggerMode", "On", &err);
 
