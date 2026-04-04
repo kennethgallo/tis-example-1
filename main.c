@@ -14,10 +14,12 @@
  * limitations under the License.
  */
 
-/* This example will show you how to start a live stream from your camera */
+/* This example will show you how to trigger images */
 
 #include <gst/gst.h>
-#include <stdio.h> /* printf and putchar */
+#include <stdio.h> /* printf */
+#include <tcam-property-1.0.h>
+#include <unistd.h> /* sleep  */
 
 
 int main(int argc, char* argv[])
@@ -33,19 +35,12 @@ int main(int argc, char* argv[])
 
     gst_init(&argc, &argv); // init gstreamer
 
-    const char* serial = NULL; // set this if you do not want the first found device
+    const char* serial = NULL; // the serial number of the camera we want to use
 
     GError* err = NULL;
 
     GstElement* pipeline =
-        gst_parse_launch("tcambin name=source ! videoconvert ! ximagesink sync=false", &err);
-
-    if (err)
-    {
-        printf("%s\n", err->message);
-        g_error_free(err);
-        err = NULL;
-    }
+        gst_parse_launch("tcambin name=source ! video/x-raw,format=BGRx ! videoconvert ! ximagesink ", &err);
 
     /* test for error */
     if (pipeline == NULL)
@@ -54,25 +49,73 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    GstElement* source = gst_bin_get_by_name(GST_BIN(pipeline), "source");
+
     if (serial != NULL)
     {
-        GstElement* source = gst_bin_get_by_name(GST_BIN(pipeline), "source");
         GValue val = {};
         g_value_init(&val, G_TYPE_STRING);
         g_value_set_static_string(&val, serial);
 
         g_object_set_property(G_OBJECT(source), "serial", &val);
 
-        gst_object_unref(source);
+        g_value_unset(&val);
     }
 
     gst_element_set_state(pipeline, GST_STATE_PLAYING);
 
-    printf("Press enter to stop the stream.\n");
-    getchar();
+    /*
+      This sleep exists only to ensure
+      that a live image exists before trigger mode is activated.
+      for all other purposes this can be removed.
+     */
+    sleep(2);
 
+    tcam_property_provider_set_tcam_enumeration(TCAM_PROPERTY_PROVIDER(source), "TriggerMode", "On", &err);
+
+    if (err)
+    {
+        printf("Error while setting trigger mode: %s\n", err->message);
+        g_error_free(err);
+        err = NULL;
+    }
+
+    while (0 == 0)
+    {
+        printf("Press 'q' then 'enter' to stop the stream.\n");
+        printf("Press 'Enter' to trigger a new image.\n");
+
+        char c = getchar();
+
+        if (c == 'q')
+        {
+            break;
+        }
+
+        tcam_property_provider_set_tcam_command(TCAM_PROPERTY_PROVIDER(source), "TriggerSoftware", &err);
+        if (err)
+        {
+            printf("!!! Could not trigger. !!!\n");
+            printf("Error while setting trigger: %s\n", err->message);
+            g_error_free(err);
+            err = NULL;
+        }
+        else
+        {
+            printf("=== Triggered image. ===\n");
+        }
+    }
+
+    /* deactivate trigger mode */
+    /* this is simply to prevent confusion when the camera ist started without wanting to trigger */
+    tcam_property_provider_set_tcam_enumeration(TCAM_PROPERTY_PROVIDER(source), "TriggerMode", "Off", &err);
+
+    // this stops the pipeline and frees all resources
     gst_element_set_state(pipeline, GST_STATE_NULL);
 
+    gst_object_unref(source);
+    /* the pipeline automatically handles all elements that have been added to it.
+       thus they do not have to be cleaned up manually */
     gst_object_unref(pipeline);
 
     return 0;
