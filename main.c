@@ -37,6 +37,8 @@ int main(int argc, char* argv[])
 
     GError* err = NULL;
 
+    GstElement* source = gst_bin_get_by_name(GST_BIN(pipeline), "source");
+
     GstElement* pipeline =
         gst_parse_launch("tcambin name=source ! videoconvert ! ximagesink sync=false", &err);
 
