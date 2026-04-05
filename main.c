@@ -1,80 +1,107 @@
-#include <gst/gst.h>
-#include <stdio.h>
-#include <tcam-property-1.0.h>
+from tis_camera import TIS, SinkFormats
+import cv2
+from datetime import datetime
+from pathlib import Path
 
-int main(int argc, char* argv[])
-{
-    gst_debug_set_default_threshold(GST_LEVEL_WARNING);
-    gst_init(&argc, &argv);
 
-    const char* serial = NULL;
-    GError* err = NULL;
+def save_capture_with_settings(cam, img, frame_num, session_dir):
+    source = cam.get_source()
 
-    GstElement* pipeline =
-        gst_parse_launch("tcambin name=source ! video/x-raw,format=BGRx ! videoconvert ! ximagesink", &err);
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_name = f"capture_{frame_num}_{timestamp}"
 
-    if (pipeline == NULL)
-    {
-        printf("Could not create pipeline. Cause: %s\n", err ? err->message : "unknown");
-        return 1;
-    }
+    image_path = session_dir / f"{base_name}.png"
+    settings_path = session_dir / f"{base_name}.json"
 
-    GstElement* source = gst_bin_get_by_name(GST_BIN(pipeline), "source");
+    # TIS helper uses BGRx, so drop the last channel for OpenCV saving
+    if len(img.shape) == 3 and img.shape[2] == 4:
+        save_img = img[:, :, :3]
+    else:
+        save_img = img
 
-    if (serial != NULL)
-    {
-        GValue val = G_VALUE_INIT;
-        g_value_init(&val, G_TYPE_STRING);
-        g_value_set_static_string(&val, serial);
-        g_object_set_property(G_OBJECT(source), "serial", &val);
-        g_value_unset(&val);
-    }
+    image_saved = cv2.imwrite(str(image_path), save_img)
 
-    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    if not image_saved:
+        print(f"Failed to save image: {image_path}")
+        return
 
-    tcam_property_provider_set_tcam_enumeration(
-        TCAM_PROPERTY_PROVIDER(source), "TriggerMode", "On", &err);
+    try:
+        state = source.get_property("tcam-properties-json")
 
-    if (err)
-    {
-        printf("Error while setting trigger mode: %s\n", err->message);
-        g_error_free(err);
-        err = NULL;
-    }
+        with open(settings_path, "w", encoding="utf-8") as f:
+            f.write(state)
 
-    while (1)
-    {
-        printf("Press 'q' then Enter to stop the stream.\n");
-        printf("Press Enter to trigger a new image.\n");
+    except Exception as e:
+        print(f"Could not save camera JSON settings: {e}")
+        return
 
-        char c = getchar();
+    print(f"Saved {image_path}")
+    print(f"Saved {settings_path}")
 
-        if (c == 'q')
-        {
-            break;
-        }
 
-        tcam_property_provider_set_tcam_command(
-            TCAM_PROPERTY_PROVIDER(source), "TriggerSoftware", &err);
+def main():
+    cam = TIS()
 
-        if (err)
-        {
-            printf("Could not trigger: %s\n", err->message);
-            g_error_free(err);
-            err = NULL;
-        }
-        else
-        {
-            printf("Triggered image.\n");
-        }
-    }
+    session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    session_dir = Path(f"capture_session_{session_timestamp}")
+    session_dir.mkdir(parents=True, exist_ok=True)
 
-    tcam_property_provider_set_tcam_enumeration(
-        TCAM_PROPERTY_PROVIDER(source), "TriggerMode", "Off", &err);
+    cam.open_device(
+        serial=None,
+        width=640,
+        height=480,
+        framerate="30/1",
+        sinkformat=SinkFormats.BGRA,
+        showvideo=True
+    )
 
-    gst_element_set_state(pipeline, GST_STATE_NULL);
-    gst_object_unref(source);
-    gst_object_unref(pipeline);
+    try:
+        cam.set_property("TriggerMode", "On")
+    except Exception as e:
+        print(f"Could not enable trigger mode: {e}")
 
-    return 0;
-}
+    if not cam.start_pipeline():
+        print("Could not start pipeline.")
+        return
+
+    frame_num = 0
+
+    print("Live preview started.")
+    print(f"Session folder: {session_dir.resolve()}")
+    print("Press Enter to trigger and save one image plus JSON settings.")
+    print("Type q and press Enter to quit.")
+
+    try:
+        while True:
+            cmd = input("> ").strip().lower()
+
+            if cmd == "q":
+                break
+
+            try:
+                cam.execute_command("TriggerSoftware")
+            except Exception as e:
+                print(f"Trigger failed: {e}")
+
+            cam.snap_image(1)
+            img = cam.get_image()
+
+            if img is None:
+                print("No image captured.")
+                continue
+
+            save_capture_with_settings(cam, img, frame_num, session_dir)
+            frame_num += 1
+
+    finally:
+        try:
+            cam.set_property("TriggerMode", "Off")
+        except Exception:
+            pass
+
+        cam.stop_pipeline()
+        print("Camera stopped.")
+
+
+if __name__ == "__main__":
+    main()
